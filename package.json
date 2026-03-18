@@ -1,0 +1,27 @@
+{
+  "name": "@os-eco/pi-extension",
+  "version": "1.1.0",
+  "description": "Overstory Ecosystem (os-eco) extension for pi-coding-agent: bridging Seeds, Mulch, Canopy, and Overstory.",
+  "main": "index.ts",
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": [
+      "./index.ts",
+      "./mulch-context.ts",
+      "./mulch-read.ts",
+      "./workflow-status.ts"
+    ]
+  },
+  "dependencies": {
+    "zod": "^3.22.4"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/os-eco/os-eco-pi-extension.git"
+  },
+  "author": "Overstory Team",
+  "license": "MIT"
+}
