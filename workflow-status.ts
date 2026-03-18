@@ -140,15 +140,18 @@ async function collectState(pi: ExtensionAPI): Promise<WorkflowState> {
 function renderWidget(ctx: ExtensionContext, state: WorkflowState): void {
 	if (!ctx.hasUI) return;
 
-	// Only show the status widget in standalone sessions.
-	// Hide it in Overstory worktrees to reduce clutter.
+	const theme = ctx.ui.theme;
 	const isOverstoryWorktree = process.cwd().includes(".overstory/worktrees/");
+
 	if (isOverstoryWorktree) {
-		ctx.ui.setWidget("os-eco", []); // Clear the widget
+		// Minimal marker for Overstory readiness detection.
+		// Always rendered in worktrees to replace the brittle token regex.
+		const agentName = process.env.OVERSTORY_AGENT_NAME || "agent";
+		const marker = `[OS-ECO:READY] ${agentName}`;
+		ctx.ui.setWidget("os-eco-ready", [theme.fg("dim", marker)]);
+		ctx.ui.setWidget("os-eco", []); // Clear the main status widget
 		return;
 	}
-
-	const theme = ctx.ui.theme;
 
 	const phaseText =
 		state.phase === "verify"
