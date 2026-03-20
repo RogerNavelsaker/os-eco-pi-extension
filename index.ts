@@ -10,9 +10,8 @@
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { isToolCallEventType, isBashToolResult } from "@mariozechner/pi-coding-agent";
-import { join } from "node:path";
-import { rename, access } from "node:fs/promises";
+import { isBashToolResult } from "@mariozechner/pi-coding-agent";
+import { getOverstorySessionMeta } from "./session";
 
 // ── Constants ──
 
@@ -26,10 +25,10 @@ const INTERACTIVE_BLOCKED = new Set(["AskUserQuestion", "EnterPlanMode", "EnterW
 const WRITE_TOOLS = new Set(["Write", "Edit", "NotebookEdit", "write", "edit"]);
 
 const NON_IMPLEMENTATION_CAPABILITIES = new Set([
-  "scout", "reviewer", "lead", "coordinator", "supervisor", "monitor",
+  "orchestrator", "scout", "reviewer", "lead", "coordinator", "supervisor", "monitor",
 ]);
 
-const COORDINATION_CAPABILITIES = new Set(["coordinator", "supervisor", "monitor"]);
+const COORDINATION_CAPABILITIES = new Set(["orchestrator", "coordinator", "supervisor", "monitor"]);
 
 const SAFE_BASH_PREFIXES = [
   "ov ", "overstory ", "bd ", "sd ", "git status", "git log", "git diff",
@@ -56,12 +55,12 @@ const FILE_MODIFYING_BASH_PATTERNS = [
 // ── Extension Implementation ──
 
 export default function (pi: ExtensionAPI) {
-  const AGENT_NAME = process.env.OVERSTORY_AGENT_NAME || "pi";
-  const CAPABILITY = process.env.OVERSTORY_CAPABILITY || "orchestrator";
-  const WORKTREE_PATH = process.env.OVERSTORY_WORKTREE_PATH || process.cwd();
-  const TASK_ID = process.env.OVERSTORY_TASK_ID;
-
-  const isOverstorySession = !!process.env.OVERSTORY_AGENT_NAME || process.cwd().includes(".overstory/worktrees/");
+  const session = getOverstorySessionMeta();
+  const AGENT_NAME = session.agentName;
+  const CAPABILITY = session.capability;
+  const WORKTREE_PATH = session.worktreePath;
+  const TASK_ID = session.taskId;
+  const isOverstorySession = session.isOverstorySession;
   const isNonImpl = NON_IMPLEMENTATION_CAPABILITIES.has(CAPABILITY);
   const isCoordination = COORDINATION_CAPABILITIES.has(CAPABILITY);
 
@@ -69,33 +68,15 @@ export default function (pi: ExtensionAPI) {
   let primeContext = "";
 
   // ── SessionStart ──────────────────────────────────────────────────────────
-  pi.on("session_start", async (_event, ctx) => {
-    // 🛡️ REAP OVERSTORY GUARD if in standalone session
-    const guardPath = join(process.cwd(), ".pi/extensions/overstory-guard.ts");
-    const bakPath = `${guardPath}.bak`;
-
-    if (!isOverstorySession) {
-      const hasGuard = await access(guardPath).then(() => true).catch(() => false);
-      if (hasGuard) {
-        await rename(guardPath, bakPath).catch(() => {});
-        ctx.ui.notify("Standalone session detected: moved overstory-guard.ts to .bak (restarting/reloading to apply)", "info");
-      }
-    } else {
-      const hasBak = await access(bakPath).then(() => true).catch(() => false);
-      if (hasBak) {
-        await rename(bakPath, guardPath).catch(() => {});
-        ctx.ui.notify("Overstory worktree detected: restored overstory-guard.ts (restarting/reloading to apply)", "info");
-      }
-    }
-
-    // Prime Seeds and Overstory
+  pi.on("session_start", async () => {
+    // Prime Seeds everywhere; only prime Overstory when the session is managed.
     const [ovResult, sdResult] = await Promise.allSettled([
-      pi.exec("ov", ["prime", "--agent", AGENT_NAME]),
+      isOverstorySession ? pi.exec("ov", ["prime", "--agent", AGENT_NAME]) : Promise.resolve(null),
       pi.exec("sd", ["prime"]),
     ]);
 
     const parts: string[] = [];
-    if (ovResult.status === "fulfilled" && ovResult.value.code === 0) {
+    if (ovResult.status === "fulfilled" && ovResult.value?.code === 0) {
       const out = ovResult.value.stdout.trim();
       if (out) parts.push(out);
     }
@@ -108,7 +89,9 @@ export default function (pi: ExtensionAPI) {
 
   // ── UserPromptSubmit ──────────────────────────────────────────────────────
   pi.on("before_agent_start", async (event, _ctx) => {
-    const mailResult = await pi.exec("ov", ["mail", "check", "--inject", "--agent", AGENT_NAME]).catch(() => null);
+    const mailResult = isOverstorySession
+      ? await pi.exec("ov", ["mail", "check", "--inject", "--agent", AGENT_NAME]).catch(() => null)
+      : null;
     const mailText = mailResult?.code === 0 ? mailResult.stdout.trim() : "";
 
     const newSystemPrompt = primeContext
@@ -131,7 +114,9 @@ export default function (pi: ExtensionAPI) {
   pi.on("tool_call", async (event, _ctx) => {
     // Activity tracking: update lastActivity so watchdog knows agent is alive.
     // Fire-and-forget — do not await (avoids latency on every tool call).
-    pi.exec("ov", ["log", "tool-start", "--agent", AGENT_NAME, "--tool-name", event.toolName]).catch(() => {});
+    if (isOverstorySession) {
+      pi.exec("ov", ["log", "tool-start", "--agent", AGENT_NAME, "--tool-name", event.toolName]).catch(() => {});
+    }
 
     if (!isOverstorySession) return;
 
@@ -229,7 +214,9 @@ export default function (pi: ExtensionAPI) {
 
   // ── PostToolUse ───────────────────────────────────────────────────────────
   pi.on("tool_execution_end", async (event, _ctx) => {
-    pi.exec("ov", ["log", "tool-end", "--agent", AGENT_NAME, "--tool-name", event.toolName]).catch(() => {});
+    if (isOverstorySession) {
+      pi.exec("ov", ["log", "tool-end", "--agent", AGENT_NAME, "--tool-name", event.toolName]).catch(() => {});
+    }
   });
 
   // ── Bash Tool Result ──────────────────────────────────────────────────────
@@ -242,15 +229,17 @@ export default function (pi: ExtensionAPI) {
   });
 
   // ── Stop ──────────────────────────────────────────────────────────────────
-  pi.on("session_shutdown", async (_event, ctx) => {
+  pi.on("session_shutdown", async () => {
     await Promise.allSettled([
-      pi.exec("ov", ["log", "session-end", "--agent", AGENT_NAME]),
+      ...(isOverstorySession ? [pi.exec("ov", ["log", "session-end", "--agent", AGENT_NAME])] : []),
       pi.exec("ml", ["learn"]),
     ]);
   });
 
   // Also handle Graceful Agent End (task done)
   pi.on("agent_end", async (_event) => {
-    await pi.exec("ov", ["log", "session-end", "--agent", AGENT_NAME]).catch(() => {});
+    if (isOverstorySession) {
+      await pi.exec("ov", ["log", "session-end", "--agent", AGENT_NAME]).catch(() => {});
+    }
   });
 }

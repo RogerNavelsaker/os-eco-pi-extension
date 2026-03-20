@@ -8,6 +8,7 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { getOverstorySessionMeta } from "./session";
 
 interface MulchWarning {
 	domain: string;
@@ -137,19 +138,23 @@ async function collectState(pi: ExtensionAPI): Promise<WorkflowState> {
 	return buildState(activeChanges, inProgressIssues, dirtyFiles, seedsCount, mulchWarnings);
 }
 
+function renderReadyMarker(ctx: ExtensionContext, agentName: string): void {
+	if (!ctx.hasUI) return;
+	const theme = ctx.ui.theme;
+	const marker = `[OVERSTORY:READY] agent=${agentName} runtime=pi`;
+	ctx.ui.setWidget("os-eco-ready", [theme.fg("dim", marker)]);
+	ctx.ui.setWidget("os-eco", []);
+}
+
 function renderWidget(ctx: ExtensionContext, state: WorkflowState): void {
 	if (!ctx.hasUI) return;
 
+	const session = getOverstorySessionMeta();
 	const theme = ctx.ui.theme;
-	const isOverstoryWorktree = process.cwd().includes(".overstory/worktrees/");
 
-	if (isOverstoryWorktree) {
-		// Minimal marker for Overstory readiness detection.
-		// Always rendered in worktrees to replace the brittle token regex.
-		const agentName = process.env.OVERSTORY_AGENT_NAME || "agent";
-		const marker = `[OS-ECO:READY] ${agentName}`;
-		ctx.ui.setWidget("os-eco-ready", [theme.fg("dim", marker)]);
-		ctx.ui.setWidget("os-eco", []); // Clear the main status widget
+	if (session.isOverstorySession) {
+		// Managed Pi sessions expose an explicit marker for Overstory readiness detection.
+		renderReadyMarker(ctx, session.agentName);
 		return;
 	}
 
@@ -209,6 +214,7 @@ function promptBlock(state: WorkflowState): string {
 }
 
 export default function (pi: ExtensionAPI) {
+	const session = getOverstorySessionMeta();
 	let cachedState: WorkflowState | null = null;
 
 	async function refresh(ctx: ExtensionContext): Promise<void> {
@@ -217,6 +223,9 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	pi.on("session_start", async (_event, ctx) => {
+		if (session.isOverstorySession) {
+			renderReadyMarker(ctx, session.agentName);
+		}
 		await refresh(ctx);
 	});
 
