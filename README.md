@@ -1,4 +1,4 @@
-# os-eco-pi-extension
+# pi-os-eco
 
 Pi extension package for the Overstory ecosystem, bridging `pi-coding-agent` with Seeds, Mulch, Canopy, and Overstory workflows.
 

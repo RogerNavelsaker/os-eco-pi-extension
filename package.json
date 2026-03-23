@@ -20,7 +20,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/os-eco/os-eco-pi-extension.git"
+    "url": "git+https://github.com/RogerNavelsaker/pi-os-eco.git"
   },
   "author": "Overstory Team",
   "license": "MIT"
