@@ -138,11 +138,17 @@ async function collectState(pi: ExtensionAPI): Promise<WorkflowState> {
 	return buildState(activeChanges, inProgressIssues, dirtyFiles, seedsCount, mulchWarnings);
 }
 
+const OVERSTORY_READY_MARKER_PREFIX = "\u2713 os-eco";
+
+function buildReadyMarker(agentName: string): string {
+	return `${OVERSTORY_READY_MARKER_PREFIX} agent=${agentName} runtime=pi`;
+}
+
 function renderReadyMarker(ctx: ExtensionContext, agentName: string): void {
 	if (!ctx.hasUI) return;
 	const theme = ctx.ui.theme;
-	const marker = `[OVERSTORY:READY] agent=${agentName} runtime=pi`;
-	ctx.ui.setWidget("os-eco-ready", [theme.fg("dim", marker)]);
+	const marker = buildReadyMarker(agentName);
+	ctx.ui.setWidget("os-eco-ready", [theme.fg("success", marker)]);
 	ctx.ui.setWidget("os-eco", []);
 }
 
